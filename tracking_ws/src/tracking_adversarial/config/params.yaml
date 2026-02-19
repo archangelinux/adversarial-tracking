@@ -1,0 +1,68 @@
+/**:
+  ros__parameters:
+    # Video source
+    video_source: ""  # Path to video file; empty string uses camera
+
+    # Detection parameters
+    detection:
+      model: "yolov8n.pt"          # YOLOv8 model variant
+      confidence_threshold: 0.25    # Minimum confidence for detections
+      nms_threshold: 0.45           # NMS IoU threshold
+      device: "cpu"                 # "cpu", "cuda:0", or "mps"
+      classes: [0, 1, 2, 3, 5, 7]  # COCO classes: person, bicycle, car, motorcycle, bus, truck
+      input_size: 640               # Model input resolution
+
+    # Tracking parameters
+    tracking:
+      track_high_thresh: 0.5        # High confidence threshold for first association
+      track_low_thresh: 0.1         # Low confidence threshold for second association
+      new_track_thresh: 0.6         # Threshold for creating new tracks
+      track_buffer: 30              # Frames to keep lost tracks
+      match_thresh: 0.8             # IoU matching threshold
+      min_box_area: 10.0            # Minimum bounding box area
+
+    # Attack parameters
+    attack:
+      enabled: false
+      type: "none"                  # "rain", "fog", "blur", "low_light", "lens_dirt",
+                                    # "contrast", "patch", "stripe", "checkerboard", "occlusion"
+      intensity: 0.5                # Attack intensity [0.0, 1.0]
+      # Adversarial patch parameters
+      patch_size: 50
+      stripe_width: 10
+      checkerboard_size: 15
+      occlusion_ratio: 0.3
+
+    # Defense parameters
+    defense:
+      enabled: false
+      temporal_consistency: true
+      multi_scale: false
+      anomaly_detection: true
+      # Temporal consistency
+      max_position_jump: 100.0      # Max pixel jump between frames
+      history_length: 30            # Frames of track history to maintain
+      recovery_frames: 10           # Frames to attempt track recovery
+      # Multi-scale
+      scales: [0.5, 1.0, 1.5]      # Detection scales
+      # Anomaly detection
+      velocity_threshold: 3.0       # Z-score threshold for velocity anomaly
+      acceleration_threshold: 3.0   # Z-score threshold for acceleration anomaly
+
+    # Evaluation parameters
+    evaluation:
+      output_dir: "data/results"
+      save_csv: true
+      log_interval: 100             # Log metrics every N frames
+      ground_truth_file: ""         # Path to ground truth annotations
+
+    # Visualization parameters
+    visualization:
+      show_detections: true
+      show_tracks: true
+      show_ids: true
+      show_trails: true
+      trail_length: 30
+      bbox_thickness: 2
+      font_scale: 0.6
+      publish_rate: 30.0            # Visualization publish rate in Hz

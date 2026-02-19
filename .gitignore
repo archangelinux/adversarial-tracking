@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+.venv/
+venv/
+
+# ROS2 build artifacts
+tracking_ws/build/
+tracking_ws/install/
+tracking_ws/log/
+
+# YOLO model weights
+*.pt
+*.onnx
+*.engine
+runs/
+
+# Data
+tracking_ws/data/videos/
+tracking_ws/data/annotations/
+tracking_ws/data/results/
+tracking_ws/data/yolo_dataset/
+
+tracking_ws/docs/project_plan.md
+
+# IDE / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+
+.claude/

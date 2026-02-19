@@ -1,0 +1,14 @@
+services:
+  tracking:
+    build: .
+    container_name: tracking_adversarial
+    # Mount source code so edits on your Mac show up inside the container
+    volumes:
+      - ./tracking_ws/src:/tracking_ws/src
+      - ./tracking_ws/data:/tracking_ws/data
+    # Keep container running for interactive use
+    stdin_open: true
+    tty: true
+    # Expose web visualization port to your Mac's browser
+    ports:
+      - "8080:8080"
