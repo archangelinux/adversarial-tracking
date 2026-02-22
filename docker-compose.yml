@@ -6,6 +6,7 @@ services:
     volumes:
       - ./tracking_ws/src:/tracking_ws/src
       - ./tracking_ws/data:/tracking_ws/data
+      - ./scripts:/tracking_ws/scripts
     # Keep container running for interactive use
     stdin_open: true
     tty: true

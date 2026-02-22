@@ -6,27 +6,34 @@ VisDrone MOT format (per line):
 YOLO format (one .txt per image):
     class_id center_x center_y width height  (all normalized 0-1)
 
-This script extracts individual frames + labels from a MOT sequence so
-YOLOv8 can train on them. It creates the standard YOLO dataset structure:
+Extracts individual frames and labels from MOT sequences for YOLOv8
+training, using the official VisDrone train/val splits.
+
+Expected VisDrone folder structure:
+    data/
+        VisDrone2019-MOT-train/
+            sequences/       (56 folders of .jpg frames)
+            annotations/     (56 .txt annotation files)
+        VisDrone2019-MOT-val/
+            sequences/       (7 folders of .jpg frames)
+            annotations/     (7 .txt annotation files)
+
+Output:
     output/
-        images/
-            train/
-            val/
-        labels/
-            train/
-            val/
+        images/train/
+        images/val/
+        labels/train/
+        labels/val/
         dataset.yaml
 
 Usage:
     python3 convert_visdrone_to_yolo.py \
-        --sequences-dir /tracking_ws/data/videos \
-        --annotations-dir /tracking_ws/data/annotations \
-        --output /tracking_ws/data/yolo_dataset \
-        --val-split 0.2
+        --train-dir /tracking_ws/data/VisDrone2019-MOT-train \
+        --val-dir /tracking_ws/data/VisDrone2019-MOT-val \
+        --output /tracking_ws/data/yolo_dataset
 """
 
 import argparse
-import random
 import shutil
 from pathlib import Path
 
@@ -34,7 +41,6 @@ import cv2
 
 
 # VisDrone categories → our class IDs for YOLO training
-# We remap to a smaller set of classes that matter for tracking
 VISDRONE_TO_CLASS = {
     1: 0,   # pedestrian → 0
     2: 0,   # people → 0 (same as pedestrian)
@@ -80,7 +86,7 @@ def parse_annotations(ann_path):
 def convert_sequence(seq_dir, ann_path, output_images, output_labels, prefix):
     """Convert one sequence to YOLO format.
 
-    Returns: list of (image_dest_path, label_dest_path) pairs created.
+    Returns: number of frames converted.
     """
     seq_dir = Path(seq_dir)
     annotations = parse_annotations(ann_path)
@@ -90,9 +96,12 @@ def convert_sequence(seq_dir, ann_path, output_images, output_labels, prefix):
     img = cv2.imread(str(first_img))
     img_h, img_w = img.shape[:2]
 
-    pairs = []
+    count = 0
 
     for img_path in sorted(seq_dir.glob('*.jpg')):
+        # Skip Google Drive duplicates like "0000179 (1).jpg"
+        if not img_path.stem.isdigit():
+            continue
         frame_id = int(img_path.stem)
         dest_name = f'{prefix}_{img_path.stem}'
 
@@ -107,7 +116,6 @@ def convert_sequence(seq_dir, ann_path, output_images, output_labels, prefix):
         with open(label_dest, 'w') as f:
             for category, x, y, w, h in boxes:
                 cls_id = VISDRONE_TO_CLASS[category]
-                # Convert to YOLO normalized format
                 cx = (x + w / 2) / img_w
                 cy = (y + h / 2) / img_h
                 nw = w / img_w
@@ -119,71 +127,59 @@ def convert_sequence(seq_dir, ann_path, output_images, output_labels, prefix):
                 nh = max(0, min(1, nh))
                 f.write(f'{cls_id} {cx:.6f} {cy:.6f} {nw:.6f} {nh:.6f}\n')
 
-        pairs.append((img_dest, label_dest))
+        count += 1
 
-    return pairs
+    return count
+
+
+def convert_split(visdrone_dir, output, split_name):
+    """Convert one VisDrone split (train or val) to YOLO format."""
+    visdrone_dir = Path(visdrone_dir)
+    seq_dir = visdrone_dir / 'sequences'
+    ann_dir = visdrone_dir / 'annotations'
+
+    out_images = output / 'images' / split_name
+    out_labels = output / 'labels' / split_name
+    out_images.mkdir(parents=True, exist_ok=True)
+    out_labels.mkdir(parents=True, exist_ok=True)
+
+    seq_dirs = sorted([d for d in seq_dir.iterdir() if d.is_dir()])
+    print(f'\n{split_name}: Found {len(seq_dirs)} sequences')
+
+    total = 0
+    for sd in seq_dirs:
+        ann_file = ann_dir / f'{sd.name}.txt'
+        if not ann_file.exists():
+            print(f'  Skipping {sd.name} — no annotation file')
+            continue
+
+        print(f'  Converting {sd.name}...', end=' ', flush=True)
+        count = convert_sequence(sd, ann_file, out_images, out_labels, sd.name)
+        print(f'{count} frames')
+        total += count
+
+    return total
 
 
 def main():
     parser = argparse.ArgumentParser(description='Convert VisDrone to YOLO format')
-    parser.add_argument('--sequences-dir', required=True,
-                        help='Directory containing sequence folders')
-    parser.add_argument('--annotations-dir', required=True,
-                        help='Directory containing annotation .txt files')
+    parser.add_argument('--train-dir', required=True,
+                        help='VisDrone2019-MOT-train directory')
+    parser.add_argument('--val-dir', required=True,
+                        help='VisDrone2019-MOT-val directory')
     parser.add_argument('--output', required=True,
                         help='Output directory for YOLO dataset')
-    parser.add_argument('--val-split', type=float, default=0.2,
-                        help='Fraction of frames for validation (default: 0.2)')
-    parser.add_argument('--seed', type=int, default=42)
     args = parser.parse_args()
 
-    random.seed(args.seed)
     output = Path(args.output)
-    sequences_dir = Path(args.sequences_dir)
-    annotations_dir = Path(args.annotations_dir)
 
-    # Create output structure
-    for split in ('train', 'val'):
-        (output / 'images' / split).mkdir(parents=True, exist_ok=True)
-        (output / 'labels' / split).mkdir(parents=True, exist_ok=True)
+    # Clean previous output if it exists
+    if output.exists():
+        print(f'Removing previous dataset at {output}')
+        shutil.rmtree(output)
 
-    # Find all sequences
-    seq_dirs = sorted([d for d in sequences_dir.iterdir() if d.is_dir()])
-    print(f'Found {len(seq_dirs)} sequences')
-
-    all_pairs = []
-    for seq_dir in seq_dirs:
-        ann_file = annotations_dir / f'{seq_dir.name}.txt'
-        if not ann_file.exists():
-            print(f'  Skipping {seq_dir.name} — no annotation file')
-            continue
-
-        print(f'  Converting {seq_dir.name}...', end=' ')
-        # Write to a temp location first, then split
-        tmp_imgs = output / 'images' / '_tmp'
-        tmp_lbls = output / 'labels' / '_tmp'
-        tmp_imgs.mkdir(parents=True, exist_ok=True)
-        tmp_lbls.mkdir(parents=True, exist_ok=True)
-
-        pairs = convert_sequence(seq_dir, ann_file, tmp_imgs, tmp_lbls, seq_dir.name)
-        all_pairs.extend(pairs)
-        print(f'{len(pairs)} frames')
-
-    # Shuffle and split
-    random.shuffle(all_pairs)
-    split_idx = int(len(all_pairs) * (1 - args.val_split))
-    train_pairs = all_pairs[:split_idx]
-    val_pairs = all_pairs[split_idx:]
-
-    # Move files to train/val
-    for pairs, split in [(train_pairs, 'train'), (val_pairs, 'val')]:
-        for img_src, lbl_src in pairs:
-            shutil.move(str(img_src), str(output / 'images' / split / img_src.name))
-            shutil.move(str(lbl_src), str(output / 'labels' / split / lbl_src.name))
-
-    # Clean up temp dirs
-    shutil.rmtree(output / 'images' / '_tmp', ignore_errors=True)
-    shutil.rmtree(output / 'labels' / '_tmp', ignore_errors=True)
+    train_count = convert_split(args.train_dir, output, 'train')
+    val_count = convert_split(args.val_dir, output, 'val')
 
     # Write dataset.yaml
     yaml_path = output / 'dataset.yaml'
@@ -196,8 +192,8 @@ def main():
         f.write(f'names: {CLASS_NAMES}\n')
 
     print(f'\nDataset created:')
-    print(f'  Train: {len(train_pairs)} images')
-    print(f'  Val:   {len(val_pairs)} images')
+    print(f'  Train: {train_count} images')
+    print(f'  Val:   {val_count} images')
     print(f'  YAML:  {yaml_path}')
     print(f'\nTo train: python3 train_visdrone.py --data {yaml_path}')
 

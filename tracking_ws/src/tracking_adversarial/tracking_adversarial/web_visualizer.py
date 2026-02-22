@@ -1,9 +1,6 @@
 """Web-based visualization dashboard for the tracking framework.
 
-Serves an MJPEG stream of annotated frames over HTTP so you can
-view live tracking results in any browser.
-
-Open http://localhost:8080 to see the dashboard.
+Serves an MJPEG stream of annotated frames over HTTP at localhost:8080.
 """
 
 import threading
@@ -100,7 +97,7 @@ class MJPEGHandler(BaseHTTPRequestHandler):
                 frame_bytes = _latest_frame
 
             if frame_bytes is None:
-                # No frame yet — send a blank placeholder
+                # Blank placeholder until frames arrive
                 blank = np.zeros((480, 640, 3), dtype=np.uint8)
                 cv2.putText(blank, 'Waiting for frames...', (120, 240),
                             cv2.FONT_HERSHEY_SIMPLEX, 1.0, (100, 100, 100), 2)
@@ -115,7 +112,7 @@ class MJPEGHandler(BaseHTTPRequestHandler):
             except BrokenPipeError:
                 break
 
-            # ~30 FPS cap
+            # 30 FPS cap
             threading.Event().wait(0.033)
 
     def log_message(self, format, *args):
@@ -157,9 +154,7 @@ class WebVisualizer(Node):
         self.frame_count = 0
         self.use_degraded = False  # Switch to degraded-only once attack node is active
 
-        # Subscribers — listen to both raw and degraded image topics.
-        # In baseline mode, only raw publishes. In adversarial mode,
-        # degraded publishes and takes priority (raw is ignored).
+        # Subscribe to both raw and degraded; prioritize degraded when available.
         self.create_subscription(
             Image, '/camera/image_raw_source', self._raw_image_cb, 10
         )

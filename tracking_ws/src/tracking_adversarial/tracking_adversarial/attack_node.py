@@ -23,6 +23,12 @@ ENVIRONMENTAL_ATTACKS = {'rain', 'fog', 'blur', 'low_light', 'lens_dirt', 'contr
 # Adversarial attacks (applied to specific bounding boxes)
 ADVERSARIAL_ATTACKS = {'patch', 'stripe', 'checkerboard', 'occlusion'}
 
+# Gradient-based attacks (FGSM, PGD) — benchmark-only.
+# These require direct access to the model's PyTorch internals to compute
+# gradients, which the attack node doesn't have (it only sees images).
+# Use scripts/benchmark.py to run these attacks.
+GRADIENT_ATTACKS = {'fgsm_light', 'fgsm_heavy', 'pgd_light', 'pgd_heavy'}
+
 
 class AttackNode(Node):
     """ROS2 node that applies attacks to camera images."""
@@ -139,6 +145,13 @@ class AttackNode(Node):
                     checkerboard_size=self.checkerboard_size,
                     occlusion_ratio=self.occlusion_ratio,
                 )
+            elif self.attack_type in GRADIENT_ATTACKS:
+                self.get_logger().warn(
+                    f'Gradient attack "{self.attack_type}" requires model access '
+                    f'and cannot run in the attack node. Use scripts/benchmark.py '
+                    f'instead. Passing through unchanged.'
+                )
+                attacked = frame
             else:
                 self.get_logger().warn(
                     f'Unknown attack type: {self.attack_type}, passing through'

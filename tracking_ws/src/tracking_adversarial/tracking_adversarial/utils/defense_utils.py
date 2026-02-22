@@ -1,16 +1,16 @@
 """Defense utilities for improving tracking robustness.
 
-Implements three defense mechanisms:
+Two defense mechanisms:
 1. TemporalConsistencyChecker — detects and corrects anomalous track jumps
-2. MultiScaleDetector — fuses detections from multiple image scales
-3. AnomalyDetector — flags suspicious motion patterns using z-scores
+   using motion prediction (weighted velocity averaging)
+2. AnomalyDetector — flags suspicious motion patterns using z-score
+   analysis on velocity and acceleration
 """
 
-from collections import defaultdict, deque
+from collections import deque
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple
 
-import cv2
 import numpy as np
 
 
@@ -148,88 +148,6 @@ class TemporalConsistencyChecker:
         ]
         for tid in stale:
             del self.tracks[tid]
-
-
-class MultiScaleDetector:
-    """Fuses detections from multiple image scales.
-
-    Runs a detection callback at different resolutions and merges
-    results using non-maximum suppression across scales.
-    """
-
-    def __init__(
-        self,
-        scales: List[float] = None,
-        nms_threshold: float = 0.5,
-    ) -> None:
-        self.scales = scales or [0.5, 1.0, 1.5]
-        self.nms_threshold = nms_threshold
-
-    def detect_multi_scale(
-        self,
-        image: np.ndarray,
-        detect_fn,
-    ) -> List[Dict]:
-        """Run detection at multiple scales and fuse results.
-
-        Args:
-            image: Input BGR image.
-            detect_fn: Callable that takes an image and returns a list
-                of dicts with keys: bbox (x1,y1,x2,y2), score, class_id.
-
-        Returns:
-            Fused detection list after cross-scale NMS.
-        """
-        h, w = image.shape[:2]
-        all_dets = []
-
-        for scale in self.scales:
-            # Resize image
-            new_w = int(w * scale)
-            new_h = int(h * scale)
-            if new_w < 32 or new_h < 32:
-                continue
-
-            scaled_img = cv2.resize(image, (new_w, new_h))
-
-            # Run detection
-            dets = detect_fn(scaled_img)
-
-            # Scale bounding boxes back to original resolution
-            for det in dets:
-                bbox = det['bbox']
-                det['bbox'] = (
-                    int(bbox[0] / scale),
-                    int(bbox[1] / scale),
-                    int(bbox[2] / scale),
-                    int(bbox[3] / scale),
-                )
-                all_dets.append(det)
-
-        # Apply NMS across scales
-        return self._cross_scale_nms(all_dets)
-
-    def _cross_scale_nms(self, detections: List[Dict]) -> List[Dict]:
-        """Apply NMS across detections from all scales."""
-        if not detections:
-            return []
-
-        boxes = np.array([d['bbox'] for d in detections], dtype=np.float32)
-        scores = np.array([d['score'] for d in detections], dtype=np.float32)
-
-        # OpenCV NMS
-        indices = cv2.dnn.NMSBoxes(
-            bboxes=boxes.tolist(),
-            scores=scores.tolist(),
-            score_threshold=0.1,
-            nms_threshold=self.nms_threshold,
-        )
-
-        if len(indices) == 0:
-            return []
-
-        indices = indices.flatten()
-        return [detections[i] for i in indices]
 
 
 class AnomalyDetector:

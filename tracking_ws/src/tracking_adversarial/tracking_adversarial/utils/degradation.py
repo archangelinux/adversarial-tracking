@@ -31,7 +31,7 @@ def add_rain(image: np.ndarray, intensity: float = 0.5) -> np.ndarray:
     for _ in range(num_drops):
         x = np.random.randint(0, w)
         y = np.random.randint(0, h)
-        # Rain falls mostly downward with slight wind drift
+        # Downward streaks with slight wind drift
         dx = np.random.randint(-2, 3)
         dy = np.random.randint(streak_length // 2, streak_length)
         brightness = np.random.randint(180, 255)
@@ -73,7 +73,7 @@ def add_fog(image: np.ndarray, intensity: float = 0.5) -> np.ndarray:
     """
     h, w = image.shape[:2]
 
-    # Create a depth-like gradient (top = far = more fog)
+    # Depth gradient: top of image = farther = more fog
     depth_map = np.linspace(1.0, 0.3, h).reshape(h, 1)
     depth_map = np.broadcast_to(depth_map, (h, w))
 
@@ -86,7 +86,7 @@ def add_fog(image: np.ndarray, intensity: float = 0.5) -> np.ndarray:
     transmission = np.clip(transmission, 0.1, 1.0)
     transmission = transmission[:, :, np.newaxis]
 
-    # Apply atmospheric scattering model: I = I_0 * t + fog * (1 - t)
+    # Atmospheric scattering: I = I_0 * t + fog * (1 - t)
     result = (image.astype(np.float32) * transmission +
               fog_color.astype(np.float32) * (1.0 - transmission))
 

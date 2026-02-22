@@ -14,11 +14,10 @@ def generate_adversarial_patch(
     patch_size: int = 50,
     pattern: str = 'noise',
 ) -> np.ndarray:
-    """Generate an adversarial patch image.
+    """Generate a high-frequency adversarial patch pattern.
 
-    Creates a high-frequency, high-contrast patch designed to confuse
-    neural network feature extractors. These simulate physically
-    printable adversarial patches.
+    Simulates physically printable adversarial patches that disrupt
+    neural network feature extraction.
 
     Args:
         patch_size: Width and height of the square patch in pixels.
@@ -115,8 +114,7 @@ def apply_stripe_pattern(
 ) -> np.ndarray:
     """Apply alternating stripe pattern to a bounding box region.
 
-    Stripes are known to confuse HOG-based and some CNN-based detectors
-    by disrupting gradient histograms.
+    Disrupts gradient histograms used by HOG and CNN-based detectors.
 
     Args:
         image: Input BGR image.

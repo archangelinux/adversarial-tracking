@@ -37,14 +37,11 @@
     defense:
       enabled: false
       temporal_consistency: true
-      multi_scale: false
       anomaly_detection: true
       # Temporal consistency
       max_position_jump: 100.0      # Max pixel jump between frames
       history_length: 30            # Frames of track history to maintain
       recovery_frames: 10           # Frames to attempt track recovery
-      # Multi-scale
-      scales: [0.5, 1.0, 1.5]      # Detection scales
       # Anomaly detection
       velocity_threshold: 3.0       # Z-score threshold for velocity anomaly
       acceleration_threshold: 3.0   # Z-score threshold for acceleration anomaly

@@ -55,7 +55,7 @@ class DetectionNode(Node):
         self.model.to(device)
         self.get_logger().info(f'Model loaded on device: {device}')
 
-        # CV Bridge for ROS <-> OpenCV conversion
+        # ROS ↔ OpenCV image converter
         self.bridge = CvBridge()
 
         # Subscribe to both raw and degraded image topics.
