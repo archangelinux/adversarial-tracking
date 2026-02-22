@@ -39,7 +39,7 @@ Video ──► [Attack Node] ──► Detection Node ──► Tracking Node �
 | Benchmark script | Done | Standalone comparison across all attack configs |
 | Evaluation node | Done | MOTA/MOTP/IDF1 against ground truth |
 | Fine-tuning pipeline | Done | VisDrone → YOLO format conversion + training script |
-| Gradient-based attacks | Planned | FGSM/PGD via torchattacks |
+| Gradient-based attacks | Done | FGSM & PGD (custom implementation, no torchattacks) |
 | Adversarial training | Planned | Fine-tune on adversarial examples for robustness |
 
 ## Quick Start (Docker)
@@ -159,8 +159,12 @@ Every component is an independent ROS2 node communicating via topics:
 | Adversarial | `stripe` | Alternating black/white stripes on objects |
 | Adversarial | `checkerboard` | Grid pattern overlaid on objects |
 | Adversarial | `occlusion` | Covers a portion of the object with a solid block |
+| Gradient | `fgsm_light` | FGSM with epsilon=4/255 — imperceptible perturbation |
+| Gradient | `fgsm_heavy` | FGSM with epsilon=16/255 — barely visible perturbation |
+| Gradient | `pgd_light` | PGD with epsilon=4/255, 10 steps — stronger than FGSM |
+| Gradient | `pgd_heavy` | PGD with epsilon=16/255, 20 steps — near-optimal attack |
 
-All attacks accept an `intensity` parameter from 0.0 to 1.0.
+Environmental and adversarial attacks accept an `intensity` parameter from 0.0 to 1.0. Gradient attacks use `epsilon` (perturbation budget) instead — configured via preset names.
 
 ## Metrics
 
@@ -178,7 +182,10 @@ adversarial-tracking/
 ├── scripts/
 │   ├── benchmark.py              # Standalone benchmarking (no ROS2 needed)
 │   ├── convert_visdrone_to_yolo.py  # Dataset conversion for fine-tuning
-│   └── train_visdrone.py         # YOLOv8 fine-tuning on VisDrone
+│   ├── train_visdrone.py         # YOLOv8 fine-tuning on VisDrone
+│   ├── modal_train.py            # Cloud GPU training via Modal (A100)
+│   ├── train_kaggle.ipynb        # Kaggle notebook for training
+│   └── train_colab.ipynb         # Colab notebook for training
 ├── tracking_ws/
 │   ├── data/
 │   │   ├── videos/               # Input sequences
@@ -195,10 +202,11 @@ adversarial-tracking/
 │       │   ├── evaluation_node.py   # Metrics computation
 │       │   ├── web_visualizer.py    # MJPEG web dashboard
 │       │   └── utils/
-│       │       ├── degradation.py   # Environmental attack implementations
-│       │       ├── adversarial.py   # Adversarial attack implementations
-│       │       ├── defense_utils.py # Defense algorithm implementations
-│       │       └── metrics.py       # MOT metrics (MOTA/MOTP/IDF1)
+│       │       ├── degradation.py       # Environmental attack implementations
+│       │       ├── adversarial.py       # Adversarial attack implementations
+│       │       ├── gradient_attacks.py  # FGSM & PGD gradient-based attacks
+│       │       ├── defense_utils.py     # Defense algorithm implementations
+│       │       └── metrics.py           # MOT metrics (MOTA/MOTP/IDF1)
 │       ├── launch/
 │       │   ├── baseline.launch.py
 │       │   ├── adversarial.launch.py
@@ -215,6 +223,92 @@ adversarial-tracking/
 - **ByteTrack** — multi-object tracking with two-stage association
 - **OpenCV** — image processing, attack implementations
 - **Docker** — containerized ROS2 environment
+
+## Fine-Tuning Pipeline
+
+The pretrained YOLOv8 model was trained on COCO (ground-level photos). It struggles on drone footage because the perspective is completely different. Fine-tuning adapts it to the VisDrone aerial domain.
+
+### Step 1: Dataset Conversion (VisDrone → YOLO)
+
+VisDrone MOT annotations store one line per object per frame:
+```
+frame_id, track_id, x, y, w, h, confidence, category, truncation, occlusion
+
+Example: 1, 3, 516, 284, 70, 45, 1, 4, 0, 0
+         │  │  │    │    │   │     │
+         │  │  │    │    │   │     └── category 4 = car
+         │  │  │    │    │   └── box height (pixels)
+         │  │  │    │    └── box width (pixels)
+         │  │  │    └── y top-left corner (pixels)
+         │  │  └── x top-left corner (pixels)
+         │  └── which tracked object
+         └── which frame
+```
+
+YOLO needs a completely different format — one `.txt` file per image:
+```
+class_id  center_x  center_y  width  height    (all normalized 0-1)
+
+Example: 2 0.394643 0.284259 0.050000 0.041667
+```
+
+The conversion does two things:
+
+**1. Remap categories.** VisDrone has 10 object categories. We compress to 8 classes:
+```
+VisDrone 1 (pedestrian) + 2 (people)          → class 0 (pedestrian)
+VisDrone 3 (bicycle)                          → class 1 (bicycle)
+VisDrone 4 (car)                              → class 2 (car)
+VisDrone 5 (van)                              → class 3 (van)
+VisDrone 6 (truck)                            → class 4 (truck)
+VisDrone 7 (tricycle) + 8 (awning-tricycle)   → class 5 (tricycle)
+VisDrone 9 (bus)                              → class 6 (bus)
+VisDrone 10 (motor)                           → class 7 (motor)
+```
+
+**2. Convert coordinates.** VisDrone gives pixel positions of the top-left corner + size. YOLO wants the center point + size, all divided by image dimensions so values are between 0 and 1:
+```
+Given: image 1400×1080, box at (516, 284) with size 70×45
+
+center_x = (516 + 70/2) / 1400 = 0.394
+center_y = (284 + 45/2) / 1080 = 0.284
+width    = 70 / 1400            = 0.050
+height   = 45 / 1080            = 0.042
+```
+
+The output is a standard YOLO dataset structure:
+```
+yolo_dataset/
+├── dataset.yaml              ← points YOLO to images + class names
+├── images/train/             ← 24,201 frames (56 sequences)
+├── images/val/               ← 2,846 frames (7 sequences)
+├── labels/train/             ← one .txt per image (same filename)
+└── labels/val/
+```
+
+### Step 2: Training
+
+Uses the Ultralytics library (high-level wrapper around PyTorch) to fine-tune `yolov8n.pt` on the converted dataset. Key settings:
+- Lower learning rate (0.001 vs default 0.01) to preserve pretrained features
+- Warmup epochs to gradually increase LR at start
+- Augmentation (rotation, flip, color shifts, mosaic) to prevent overfitting
+- Checkpoints saved every 5 epochs for crash recovery
+
+```bash
+# Convert
+python3 scripts/convert_visdrone_to_yolo.py \
+    --train-dir data/VisDrone2019-MOT-train \
+    --val-dir data/VisDrone2019-MOT-val \
+    --output data/yolo_dataset
+
+# Train (GPU recommended)
+python3 scripts/train_visdrone.py \
+    --data data/yolo_dataset/dataset.yaml \
+    --epochs 50 --device 0
+
+# Or use Modal for cloud A100 GPU:
+modal run scripts/modal_train.py
+```
 
 ## Roadmap
 

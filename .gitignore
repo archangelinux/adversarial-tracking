@@ -22,10 +22,9 @@ runs/
 # Data
 tracking_ws/data/videos/
 tracking_ws/data/annotations/
-tracking_ws/data/results/
 tracking_ws/data/yolo_dataset/
 
-tracking_ws/docs/project_plan.md
+tracking_ws/docs/
 
 # IDE / OS
 .vscode/
