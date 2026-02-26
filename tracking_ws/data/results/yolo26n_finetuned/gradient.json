@@ -1,0 +1,66 @@
+{
+  "metadata": {
+    "model": "/vol/results_yolo26/train/weights/best.pt",
+    "model_name": "yolo26n_finetuned",
+    "family": "yolo26",
+    "num_sequences": 7,
+    "num_frames": 2846,
+    "date": "2026-02-25 17:22",
+    "device": "cuda",
+    "attack_type": "gradient_only"
+  },
+  "results": [
+    {
+      "TP": 36813,
+      "FP": 7166,
+      "FN": 71832,
+      "ID_Sw": 7839,
+      "GT": 108645,
+      "total_iou": 28329.28241556601,
+      "MOTA": 0.20072713884670257,
+      "MOTP": 0.7695456065945728,
+      "name": "FGSM (light)",
+      "attack_type": "fgsm_light",
+      "time": 527.497318983078
+    },
+    {
+      "TP": 25878,
+      "FP": 3889,
+      "FN": 82767,
+      "ID_Sw": 5436,
+      "GT": 108645,
+      "total_iou": 20080.02240469766,
+      "MOTA": 0.15235859910718397,
+      "MOTP": 0.7759495480600378,
+      "name": "FGSM (heavy)",
+      "attack_type": "fgsm_heavy",
+      "time": 578.9766511917114
+    },
+    {
+      "TP": 38651,
+      "FP": 8138,
+      "FN": 69994,
+      "ID_Sw": 8264,
+      "GT": 108645,
+      "total_iou": 29633.742999564358,
+      "MOTA": 0.20478623038335864,
+      "MOTP": 0.7667005510740824,
+      "name": "PGD (light)",
+      "attack_type": "pgd_light",
+      "time": 1469.228467464447
+    },
+    {
+      "TP": 34942,
+      "FP": 6447,
+      "FN": 73703,
+      "ID_Sw": 7801,
+      "GT": 108645,
+      "total_iou": 26920.59702395787,
+      "MOTA": 0.19047356067927657,
+      "MOTP": 0.770436638542667,
+      "name": "PGD (heavy)",
+      "attack_type": "pgd_heavy",
+      "time": 2550.287567615509
+    }
+  ]
+}

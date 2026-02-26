@@ -25,7 +25,7 @@ tracking_ws/data/annotations/
 tracking_ws/data/yolo_dataset/
 tracking_ws/data/VisDrone2019-MOT-*/
 
-tracking_ws/docs/
+docs/
 
 # IDE / OS
 .vscode/

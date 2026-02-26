@@ -643,6 +643,7 @@ def main():
     parser.add_argument('--max-frames', type=int, default=0, help='Limit frames per sequence (0 = all)')
     parser.add_argument('--output', default='', help='Output directory (default: auto)')
     parser.add_argument('--baseline-only', action='store_true', help='Only run clean baseline (no attacks)')
+    parser.add_argument('--skip-gradient', action='store_true', help='Skip gradient attacks (FGSM/PGD) — run these on GPU via Modal instead')
     parser.add_argument('--serve', action='store_true', help='Serve the report on http://localhost:8080 after generating')
     args = parser.parse_args()
 
@@ -720,6 +721,9 @@ def main():
             ('PGD (light)',         'pgd_light',    0.0),
             ('PGD (heavy)',         'pgd_heavy',    0.0),
         ]
+
+    if args.skip_gradient:
+        configs = [(n, a, i) for n, a, i in configs if a not in GRADIENT_ATTACKS]
 
     # Capture sample images from the first sequence's middle frame
     first_images = sequences[0][1]

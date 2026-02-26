@@ -1,9 +1,15 @@
-"""Gradient-based adversarial attacks for object detection models.
+"""Gradient-based adversarial attacks for YOLO detection models.
 
-Implements FGSM and PGD attacks against YOLOv8's detection head. Bypasses
+Implements FGSM and PGD attacks against the YOLO detection head. Bypasses
 NMS (not differentiable) by calling the inner nn.Module directly and
 optimizing against the sum of detection confidences across all anchor
 positions, keeping the full computation graph differentiable.
+
+Supports both YOLOv8 and YOLO26. YOLO26 uses an end-to-end NMS-free design
+whose one-to-one head explicitly detaches gradients. The wrapper disables
+end2end mode so it falls back to the one-to-many head, which produces raw
+predictions in the same format as YOLOv8 (batch, 4+nc, num_anchors) with
+gradients intact.
 
 Custom implementation rather than torchattacks because torchattacks targets
 classifiers, not multi-anchor detection models.
@@ -46,18 +52,28 @@ def tensor_to_numpy(tensor: torch.Tensor) -> np.ndarray:
     return cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
 
 
-class YOLOv8AttackWrapper(nn.Module):
-    """Differentiable wrapper around YOLOv8 for gradient-based attacks.
+class YOLOAttackWrapper(nn.Module):
+    """Differentiable wrapper around YOLO models for gradient-based attacks.
 
     Bypasses NMS by calling the inner nn.Module directly and returning
     the sum of max-class confidences across all anchor positions as a
     scalar loss. Subtracting the gradient of this loss w.r.t. input
     pixels produces perturbations that suppress detections.
+
+    Works with both YOLOv8 and YOLO26. YOLO26's default end-to-end head
+    detaches gradients internally, so we disable it to use the one-to-many
+    head which preserves the gradient graph.
     """
 
     def __init__(self, yolo_model):
         super().__init__()
         self.inner_model = yolo_model.model
+
+        # YOLO26 end2end mode detaches gradients on the one-to-one head.
+        # Disable it so we get raw one-to-many predictions with gradients.
+        head = self.inner_model.model[-1]
+        if hasattr(head, 'end2end'):
+            head.end2end = False
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Return sum of max-class confidences across all anchor positions.
@@ -95,7 +111,7 @@ def fgsm_attack(
         Adversarially perturbed BGR uint8 image.
     """
     orig_h, orig_w = image.shape[:2]
-    wrapper = YOLOv8AttackWrapper(model)
+    wrapper = YOLOAttackWrapper(model)
     wrapper.eval()
 
     x = numpy_to_tensor(image, device)
@@ -135,7 +151,7 @@ def pgd_attack(
         Adversarially perturbed BGR uint8 image.
     """
     orig_h, orig_w = image.shape[:2]
-    wrapper = YOLOv8AttackWrapper(model)
+    wrapper = YOLOAttackWrapper(model)
     wrapper.eval()
 
     x_orig = numpy_to_tensor(image, device)

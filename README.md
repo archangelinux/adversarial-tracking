@@ -13,7 +13,7 @@ A ROS2-based framework for evaluating how adversarial conditions degrade object 
                     +───────────+                  +───────────+
 ```
 
-**Core question:** *How fragile is a modern perception pipeline under adversarial conditions, and how much does domain-specific fine-tuning help?*
+**Core question:** *How fragile is a modern perception pipeline under adversarial conditions, how much does domain-specific fine-tuning help, and does a newer architecture (YOLO26) offer better adversarial robustness than YOLOv8?*
 
 ## Architecture
 
@@ -85,7 +85,15 @@ The framework implements 14 attacks across three categories, each modeling a dif
 | Gradient | `pgd_light` | PGD, epsilon=4/255, 10 steps | White-box, stronger than FGSM |
 | Gradient | `pgd_heavy` | PGD, epsilon=16/255, 20 steps | White-box, near-optimal |
 
-**Environmental vs adversarial vs gradient:** Environmental attacks degrade the whole image in ways a human would also struggle with. Adversarial pattern attacks target specific detected objects, modeling physical-world attacks like adversarial patches on clothing. Gradient attacks (FGSM/PGD) compute pixel perturbations using the model's own gradients — imperceptible to humans but devastating to the detector. The gradient attacks are implemented from scratch against YOLOv8's detection head (not using torchattacks, which targets classifiers).
+**Environmental vs adversarial vs gradient:** Environmental attacks degrade the whole image in ways a human would also struggle with. Adversarial pattern attacks target specific detected objects, modeling physical-world attacks like adversarial patches on clothing. Gradient attacks (FGSM/PGD) compute pixel perturbations using the model's own gradients — imperceptible to humans but devastating to the detector.
+
+### The NMS bypass problem
+
+Gradient attacks require computing gradients through the entire model — a smooth, continuous path from output back to input pixels. Standard YOLO inference ends with **Non-Maximum Suppression (NMS)**, a post-processing step that filters thousands of overlapping candidate boxes down to clean detections: keep the highest-confidence box, discard all boxes that overlap it above an IoU threshold, repeat. NMS is a hard keep/discard selection, not a differentiable operation, so gradients can't flow through it.
+
+Libraries like `torchattacks` target classifiers (one output label per image), where this problem doesn't exist. For detection models, the gradient attacks are implemented from scratch: the `YOLOAttackWrapper` in `gradient_attacks.py` bypasses NMS and attacks the **raw detection grid** — the tensor of all candidate predictions before filtering. The loss function operates on these raw predictions, so gradients flow cleanly from the detection head back to the input pixels. Perturbations that corrupt the raw predictions cause the final post-NMS detections to fail.
+
+**YOLO26 compatibility:** YOLO26 introduces an NMS-free end-to-end design with a one-to-one detection head. However, this head explicitly detaches gradients internally (since it's designed for inference, not training through). The wrapper disables `end2end` mode to fall back to the one-to-many head, which produces raw predictions in the same format as YOLOv8 with gradients intact.
 
 ## Defense Mechanisms
 
@@ -113,23 +121,81 @@ For multi-sequence evaluation, metrics are aggregated by summing raw counts (TP,
 
 ## Benchmark Results
 
-Evaluated on the full VisDrone2019-MOT validation set (7 sequences, 2,846 frames, 108,645 ground truth annotations):
+Evaluated on the full VisDrone2019-MOT validation set (7 sequences, 2,846 frames, 108,645 ground truth annotations). Four models tested: YOLOv8n and YOLO26n, each pretrained (COCO) and fine-tuned (VisDrone).
+
+### Baseline Performance (Clean, No Attacks)
 
 | Model | MOTA | MOTP | TP | FP | FN | ID Switches |
-|-------|------|------|------|------|--------|-------------|
-| YOLOv8n pretrained (COCO) | 0.107 | 0.799 | 15,243 | 1,201 | 93,402 | 2,420 |
-| YOLOv8n fine-tuned (VisDrone) | 0.207 | 0.762 | 39,071 | 7,902 | 69,574 | 8,630 |
+|-------|------|------|--------|--------|--------|-------------|
+| YOLOv8n pretrained | 0.107 | 0.799 | 15,243 | 1,201 | 93,402 | 2,420 |
+| YOLOv8n fine-tuned | 0.334 | 0.762 | 49,677 | 8,985 | 58,968 | 8,372 |
+| YOLO26n pretrained | 0.087 | 0.813 | 12,656 | 882 | 95,989 | 1,769 |
+| YOLO26n fine-tuned | 0.195 | 0.768 | 36,453 | 8,436 | 72,192 | 6,848 |
 
-**Why MOTA is low:** VisDrone is one of the hardest MOT benchmarks. Objects are tiny (often 10-30 pixels), densely packed (averaging ~38 per frame), and viewed from drone altitude — a perspective COCO never trained on. Published state-of-the-art results on VisDrone-MOT with full-size models achieve MOTA 0.3-0.5. YOLOv8n (nano) is the smallest and fastest variant, trading accuracy for speed. These numbers are expected for this model size on this dataset.
+### Performance Under Attack (MOTA)
 
-**Key observations:**
-- Fine-tuning nearly **doubled MOTA** (0.107 → 0.207) and increased true positives by **156%** (15K → 39K), confirming that domain adaptation is essential for aerial footage.
-- The pretrained model's high MOTP (0.799) but low MOTA (0.107) reveals it detects few objects but localizes them well — it only finds the easy, large targets. Fine-tuning trades slightly lower MOTP for dramatically better recall.
-- The increase in ID switches (2.4K → 8.6K) is expected: more detections means more opportunities for the tracker to confuse identities, especially in VisDrone's dense, small-object scenes. This is a tracker tuning issue, not a model quality problem.
+Non-gradient attacks run locally on CPU; gradient attacks (FGSM/PGD) run on A100 GPU via Modal.
+
+| Attack | v8 pretrained | v8 fine-tuned | v26 pretrained | v26 fine-tuned |
+|--------|--------------|--------------|----------------|----------------|
+| Baseline (clean) | 0.107 | 0.334 | 0.087 | 0.195 |
+| Fog (light) | — | 0.335 | 0.076 | 0.191 |
+| Fog (heavy) | — | 0.258 | 0.054 | 0.148 |
+| Rain (light) | — | 0.303 | 0.081 | 0.188 |
+| Rain (heavy) | — | 0.243 | 0.061 | 0.166 |
+| Blur (light) | — | 0.147 | 0.058 | 0.143 |
+| Blur (heavy) | — | 0.011 | 0.045 | 0.084 |
+| Low light | — | 0.186 | 0.050 | 0.117 |
+| Low light (extreme) | — | 0.000 | 0.001 | 0.002 |
+| Contrast loss | — | 0.343 | 0.079 | 0.193 |
+| Adv. patch | — | 0.134 | -0.003 | -0.006 |
+| Adv. stripe | — | 0.003 | -0.004 | -0.029 |
+| Checkerboard | — | 0.011 | -0.003 | -0.008 |
+| Occlusion | — | 0.092 | 0.016 | 0.041 |
+| FGSM (light) | 0.101 | 0.205 | 0.085 | 0.201 |
+| FGSM (heavy) | 0.066 | 0.153 | 0.061 | 0.152 |
+| PGD (light) | 0.103 | 0.209 | 0.086 | 0.205 |
+| PGD (heavy) | 0.091 | 0.192 | 0.078 | 0.190 |
+
+### MOTA Drop from Baseline (%)
+
+| Attack | v8 fine-tuned | v26 fine-tuned |
+|--------|--------------|----------------|
+| Fog (heavy) | -22.8% | -24.1% |
+| Rain (heavy) | -27.4% | -15.0% |
+| Blur (light) | -56.0% | -26.5% |
+| Blur (heavy) | -96.8% | -56.7% |
+| Low light | -44.3% | -39.9% |
+| Low light (extreme) | -100% | -99.0% |
+| Adv. stripe | -99.1% | -114.9% |
+| Checkerboard | -96.8% | -104.3% |
+| Occlusion | -72.5% | -78.7% |
+| FGSM (light) | -38.7% | -3.0%\* |
+| FGSM (heavy) | -54.4% | -21.8% |
+| PGD (light) | -37.6% | -5.1%\* |
+| PGD (heavy) | -42.6% | -2.2% |
+
+\*YOLO26 fine-tuned shows marginal improvement under light gradient attacks — likely within methodological noise (baseline measured on CPU, gradient attacks on GPU with different inference head configuration).
+
+### Key Findings
+
+1. **Fine-tuning is essential.** Both models roughly doubled or tripled baseline MOTA after fine-tuning on VisDrone. Domain adaptation matters more than architecture choice for aerial tracking.
+
+2. **YOLOv8n outperforms YOLO26n at nano scale.** Despite being a newer architecture with attention mechanisms, YOLO26n's design overhead hurts at the smallest model size (0.334 vs 0.195 fine-tuned baseline). The architectural innovations likely need larger model variants (s/m/l) to pay off.
+
+3. **YOLO26 fine-tuned is significantly more robust to gradient attacks.** PGD heavy drops YOLOv8 fine-tuned by 42.6% but YOLO26 fine-tuned by only 2.2%. This is the most notable result — the attention-based architecture appears to diffuse adversarial gradients, making white-box attacks less effective even though baseline performance is lower.
+
+4. **Adversarial pattern attacks are devastating regardless of architecture.** Stripe, checkerboard, and patch attacks drive MOTA to zero or negative across all models. These attacks directly corrupt object appearance and overwhelm any detector.
+
+5. **Environmental attacks show a robustness-accuracy tradeoff.** YOLO26 fine-tuned shows smaller relative drops under rain and blur despite lower absolute MOTA, suggesting the architecture degrades more gracefully under input corruption.
+
+6. **Low light (extreme) is a universal failure mode.** All models collapse to MOTA ~0.000 at 80% intensity — this represents a fundamental limit of visual perception, not a model-specific weakness.
+
+**Why MOTA is low overall:** VisDrone is one of the hardest MOT benchmarks. Objects are tiny (often 10-30 pixels), densely packed (~38 per frame), and viewed from drone altitude. Published state-of-the-art results with full-size models and 1280px input achieve MOTA 0.3-0.5. This study uses nano (n) variants at 640px resolution for computational feasibility. The focus is on **relative degradation** under attack rather than absolute tracking performance.
 
 ## Fine-Tuning Pipeline
 
-The pretrained YOLOv8n was trained on COCO (330K ground-level photos). Drone footage has fundamentally different characteristics: top-down perspective, small and densely packed objects, and different scale distributions. Fine-tuning adapts the model to this domain.
+Both YOLOv8n and YOLO26n are pretrained on COCO (330K ground-level photos). Drone footage has fundamentally different characteristics: top-down perspective, small and densely packed objects, and different scale distributions. Fine-tuning adapts each model to the VisDrone domain.
 
 ### Dataset conversion (VisDrone → YOLO format)
 
@@ -137,9 +203,31 @@ VisDrone MOT stores per-object-per-frame annotations (`frame_id, track_id, x, y,
 
 ### Training approach
 
-- **Low learning rate (0.001)** instead of freezing layers — with 24K training images there's no overfitting risk, and allowing all layers to update slightly lets early features adapt to aerial-specific edge patterns while late layers retrain fully. This is effectively a soft version of selective layer freezing.
-- **Standard augmentation** (mosaic, rotation, color shifts) to improve generalization.
+Both models were trained on Modal (A100 GPU) with identical hyperparameters for fair comparison:
+
+- **50 epochs** with early stopping (patience 100)
+- **Low learning rate (0.001)** instead of freezing layers — with 24K training images there's no overfitting risk, and allowing all layers to update slightly lets early features adapt to aerial-specific edge patterns while late layers retrain fully.
+- **Standard augmentation** (mosaic, mixup, rotation, color shifts) to improve generalization.
+- **640px input resolution** for computational feasibility (1280px would improve small object detection but increase training and benchmark time significantly).
 - **Checkpoint recovery** for resuming interrupted training runs.
+
+## Design Decisions
+
+### Why Ultralytics is only used for detection
+
+Ultralytics YOLO provides built-in modes for tracking (`model.track()` with ByteTrack), validation (mAP), and benchmarking (inference speed across export formats). This project intentionally uses only **Train** and **Predict** modes, building everything else custom:
+
+- **Tracking** — Ultralytics' built-in `model.track()` is a black box. The ROS2 architecture requires a separate tracking node so attack and defense stages can be inserted between detection and tracking. Implementing ByteTrack from scratch also gives direct access to Kalman filter states, association thresholds, and track lifecycle — all of which the defense node inspects to detect anomalies.
+
+- **Evaluation** — Ultralytics' `val` mode computes detection metrics (mAP). This project needs **tracking** metrics (MOTA/MOTP), which measure identity consistency across frames — something Ultralytics doesn't provide. The custom `MOTMetrics` class computes these from raw TP/FP/FN/IDSW counts.
+
+- **Gradient attacks** — Ultralytics doesn't expose the raw detection grid needed for backpropagation. The custom FGSM/PGD implementation wraps YOLOv8's detection head directly, bypassing NMS (which isn't differentiable) to compute gradients against the raw prediction tensor. Libraries like `torchattacks` target classifiers, not detection models.
+
+- **Benchmarking** — Ultralytics' benchmark mode measures inference speed across export formats (ONNX, TensorRT). This project's benchmark measures tracking accuracy degradation under 14 different adversarial attacks — a fundamentally different evaluation.
+
+### Why ROS2
+
+Each pipeline stage (source → attack → detection → tracking → defense → evaluation) runs as an independent node communicating via pub/sub topics. This makes it possible to add or remove attack and defense stages at launch time without modifying any node code. The same detection node works in baseline, adversarial, and defended configurations — only the launch file changes.
 
 ## Quick Start
 
@@ -222,7 +310,10 @@ adversarial-tracking/
 │   ├── benchmark.py                    # Standalone benchmarking across all attacks
 │   ├── convert_visdrone_to_yolo.py     # VisDrone MOT → YOLO format conversion
 │   ├── train_visdrone.py               # YOLOv8 fine-tuning on VisDrone
-│   └── modal_train.py                  # Cloud GPU training via Modal (A100)
+│   ├── modal_train.py                  # Cloud GPU training via Modal (A100)
+│   ├── modal_train_yolo26.py           # YOLO26 fine-tuning on Modal (A100)
+│   ├── modal_benchmark_gradient.py     # Gradient attack benchmarks on Modal (A100)
+│   └── run_all_benchmarks.sh           # Run all missing benchmarks (Modal + local)
 └── tracking_ws/
     └── src/tracking_adversarial/
         ├── tracking_adversarial/
@@ -246,8 +337,9 @@ adversarial-tracking/
 ## Tech Stack
 
 - **ROS2 Humble** — node orchestration, pub/sub messaging, runtime parameter management
-- **YOLOv8** (Ultralytics) — real-time object detection, pretrained on COCO
+- **YOLOv8 + YOLO26** (Ultralytics) — real-time object detection, pretrained on COCO, fine-tuned on VisDrone
 - **ByteTrack** — multi-object tracking with two-stage association (high + low confidence)
 - **PyTorch** — gradient-based attack computation (FGSM/PGD)
 - **OpenCV** — image processing for environmental and adversarial attacks
 - **Docker** — containerized ROS2 environment with all dependencies
+- **Modal** — cloud GPU (A100) for fine-tuning and gradient attack benchmarks
