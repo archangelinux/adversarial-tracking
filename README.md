@@ -4,7 +4,7 @@ A ROS2-based framework for evaluating how adversarial conditions degrade object 
 
 **Core question:** *How fragile is a modern perception pipeline under adversarial conditions, how much does domain-specific fine-tuning help, and does a newer architecture (YOLO26) offer better adversarial robustness than YOLOv8?*
 
-> For architecture details, ROS2 pipeline design, attack implementations, and setup instructions, see [docs/architecture.md](docs/architecture.md).
+> For architecture details, ROS2 pipeline design, attack implementations, and setup instructions, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
